@@ -12,7 +12,7 @@
     >
       <div class="mb-8 text-center">
         <h1 class="text-2xl font-semibold text-slate-900">Virtual Binz</h1>
-        <p class="text-sm text-slate-500 mt-1 pl-1">Sign/login</p>
+        <p class="text-sm text-slate-500 mt-1">Create your account</p>
       </div>
 
       <form id="registerForm" novalidate class="space-y-5">
@@ -28,7 +28,7 @@
             id="name"
             maxlength="20"
             class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
-            placeholder="Riya Sharma"
+            placeholder="Nagender Rao"
           />
           <p class="text-xs text-slate-400 mt-1">
             <span id="nameCount">0</span>/20 characters
@@ -47,7 +47,7 @@
             type="text"
             id="email"
             class="w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-600 focus:border-teal-600"
-            placeholder="you@gmail.com"
+            placeholder="ex-you@gmail.com"
           />
           <p id="emailError" class="text-xs text-red-600 mt-1 hidden"></p>
         </div>
@@ -137,6 +137,13 @@
           Create account
         </button>
       </form>
+
+      <p class="text-sm text-slate-500 text-center mt-6">
+        Already have an account?
+        <a href="login.html" class="text-teal-700 font-medium hover:underline"
+          >Log in</a
+        >
+      </p>
     </div>
 
     <script>
@@ -209,7 +216,12 @@
         return "";
       }
 
-      form.addEventListener("submit", (e) => {
+      // Where the backend is running. Change this if you deploy it elsewhere.
+      const API_BASE = "http://localhost:4000";
+
+      const submitButton = form.querySelector('button[type="submit"]');
+
+      form.addEventListener("submit", async (e) => {
         e.preventDefault(); // stop the page from reloading — we're handling this in JS
 
         const nameErr = validateName(nameInput.value);
@@ -238,18 +250,63 @@
         ].some(Boolean);
 
         const successBox = document.getElementById("formSuccess");
-        if (allValid) {
-          successBox.textContent =
-            "All fields valid — this is where we'll send data to the backend later.";
-          successBox.classList.remove("hidden");
-          console.log("Form data:", {
-            name: nameInput.value,
-            email: document.getElementById("email").value,
-            phone: "+91" + document.getElementById("phone").value,
-            orgId: document.getElementById("orgId").value,
+        successBox.classList.add("hidden");
+        if (!allValid) return;
+
+        // Build multipart form data so the photo file can travel alongside
+        // the text fields in one request.
+        const formData = new FormData();
+        formData.append("name", nameInput.value);
+        formData.append("email", document.getElementById("email").value);
+        formData.append("password", document.getElementById("password").value);
+        formData.append("phone", document.getElementById("phone").value);
+        formData.append("orgId", document.getElementById("orgId").value);
+        const photoFile = document.getElementById("photo").files[0];
+        if (photoFile) formData.append("photo", photoFile);
+
+        submitButton.disabled = true;
+        submitButton.textContent = "Creating account…";
+
+        try {
+          const res = await fetch(`${API_BASE}/api/auth/signup`, {
+            method: "POST",
+            body: formData,
           });
-        } else {
-          successBox.classList.add("hidden");
+          const data = await res.json();
+
+          if (!res.ok) {
+            // Backend found problems (e.g. duplicate email) — show them
+            // under the matching fields, same as client-side validation.
+            if (data.errors) {
+              Object.entries(data.errors).forEach(([field, message]) =>
+                setError(field, message)
+              );
+            } else {
+              successBox.textContent = data.error || "Something went wrong.";
+              successBox.classList.remove("hidden", "text-teal-700", "bg-teal-50", "border-teal-200");
+              successBox.classList.add("text-red-700", "bg-red-50", "border-red-200");
+            }
+            return;
+          }
+
+          // Success — store the token so future requests can prove who's logged in.
+          localStorage.setItem("token", data.token);
+          localStorage.setItem("user", JSON.stringify(data.user));
+
+          successBox.textContent = `Account created — welcome, ${data.user.name}!`;
+          successBox.classList.remove("hidden", "text-red-700", "bg-red-50", "border-red-200");
+          successBox.classList.add("text-teal-700", "bg-teal-50", "border-teal-200");
+          form.reset();
+          nameCount.textContent = "0";
+        } catch (err) {
+          console.error("Signup request failed:", err);
+          successBox.textContent =
+            "Couldn't reach the server. Is the backend running on localhost:4000?";
+          successBox.classList.remove("hidden", "text-teal-700", "bg-teal-50", "border-teal-200");
+          successBox.classList.add("text-red-700", "bg-red-50", "border-red-200");
+        } finally {
+          submitButton.disabled = false;
+          submitButton.textContent = "Create account";
         }
       });
     </script>
