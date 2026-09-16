@@ -6,6 +6,6 @@ const { signup, login } = require("../controllers/authController");
 const router = express.Router();
 
 router.post("/signup", upload.single("photo"), validateSignup, signup);
-router.post("/login", validateLogin, login);
+router.post("/login", login);
 
 module.exports = router;

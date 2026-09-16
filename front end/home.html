@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Home — Virtual Binz</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+    <style>
+      body { font-family: "Inter", -apple-system, sans-serif; }
+      .display { font-family: "Sora", -apple-system, sans-serif; }
+      .num { font-variant-numeric: tabular-nums; }
+
+      .hero-glow {
+        background:
+          radial-gradient(circle at 15% 20%, rgba(14,165,160,0.18), transparent 40%),
+          radial-gradient(circle at 85% 0%, rgba(109,93,246,0.16), transparent 45%);
+      }
+
+      .kpi-card {
+        transition: transform 220ms cubic-bezier(.2,.8,.2,1), box-shadow 220ms ease, border-color 220ms ease;
+      }
+      .kpi-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 12px 24px -12px rgba(15,23,42,0.18);
+      }
+
+      .btn-primary {
+        background: linear-gradient(135deg, #0EA5A0, #6D5DF6);
+        transition: transform 180ms cubic-bezier(.34,1.56,.64,1), box-shadow 180ms ease, filter 180ms ease;
+      }
+      .btn-primary:hover {
+        transform: scale(1.045);
+        box-shadow: 0 10px 20px -8px rgba(109,93,246,0.45);
+        filter: brightness(1.06);
+      }
+      .btn-primary:active { transform: scale(0.98); }
+
+      .deal-card {
+        transition: transform 200ms ease, box-shadow 200ms ease, border-color 200ms ease;
+      }
+      .deal-card:hover {
+        transform: translateX(4px);
+        box-shadow: 0 8px 20px -10px rgba(15,23,42,0.15);
+      }
+
+      .side-link {
+        transition: background 160ms ease, color 160ms ease, padding-left 160ms ease;
+      }
+      .side-link:hover { background: #F1F5F9; padding-left: 14px; }
+      .side-link.active {
+        background: linear-gradient(90deg, rgba(14,165,160,0.10), rgba(109,93,246,0.08));
+        color: #0F172A;
+      }
+      .side-link.active .dot { background: linear-gradient(135deg, #0EA5A0, #6D5DF6); }
+
+      .task-check {
+        appearance: none;
+        width: 18px; height: 18px;
+        border: 2px solid #CBD5E1;
+        border-radius: 6px;
+        display: inline-block;
+        position: relative;
+        cursor: pointer;
+        transition: border-color 160ms ease, background 160ms ease;
+        flex-shrink: 0;
+      }
+      .task-check:hover { border-color: #0EA5A0; }
+      .task-check:checked {
+        background: linear-gradient(135deg, #0EA5A0, #6D5DF6);
+        border-color: transparent;
+      }
+      .task-check:checked::after {
+        content: "";
+        position: absolute; left: 5px; top: 1px;
+        width: 5px; height: 9px;
+        border: solid white; border-width: 0 2px 2px 0;
+        transform: rotate(45deg);
+      }
+
+      .streak-badge {
+        animation: pop 480ms cubic-bezier(.34,1.56,.64,1) 200ms both;
+      }
+      @keyframes pop {
+        0% { transform: scale(0.6); opacity: 0; }
+        100% { transform: scale(1); opacity: 1; }
+      }
+
+      .count-up { opacity: 0; animation: rise 420ms ease-out 120ms forwards; }
+      @keyframes rise {
+        0% { opacity: 0; transform: translateY(6px); }
+        100% { opacity: 1; transform: translateY(0); }
+      }
+
+      .user-card {
+        transition: background 160ms ease;
+      }
+      .user-card:hover { background: #F1F5F9; }
+
+      #sidebar {
+        transition: transform 260ms cubic-bezier(.2,.8,.2,1);
+      }
+
+      #sidebarToggle {
+        transition: transform 160ms ease, box-shadow 160ms ease;
+      }
+      #sidebarToggle:hover { transform: scale(1.06); box-shadow: 0 6px 16px -6px rgba(15,23,42,0.25); }
+      #sidebarToggle:active { transform: scale(0.95); }
+
+      #sidebarBackdrop {
+        transition: opacity 220ms ease;
+      }
+    </style>
+  </head>
+  <body class="bg-[#F7F8FA] text-[#10131A]">
+    <!-- Mobile-only sidebar toggle -->
+    <button
+      id="sidebarToggle"
+      class="md:hidden fixed top-4 left-4 z-50 w-10 h-10 rounded-full bg-white border border-slate-200 shadow-sm flex items-center justify-center"
+      aria-label="Open menu"
+      aria-expanded="false"
+      aria-controls="sidebar"
+    >
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M2 4.5H16M2 9H16M2 13.5H16" stroke="#10131A" stroke-width="1.6" stroke-linecap="round"/>
+      </svg>
+    </button>
+
+    <!-- Backdrop, only relevant on small screens while the drawer is open -->
+    <div id="sidebarBackdrop" class="hidden md:hidden fixed inset-0 bg-slate-900/30 z-30"></div>
+
+    <div class="flex min-h-screen">
+      <!-- Sidebar: off-canvas drawer on small screens, static column from md up -->
+      <aside
+        id="sidebar"
+        class="fixed md:static inset-y-0 left-0 z-40 w-64 shrink-0 bg-white border-r border-slate-200 flex flex-col -translate-x-full md:translate-x-0 md:h-screen md:sticky md:top-0"
+      >
+        <div class="px-5 py-5 border-b border-slate-100 flex items-center justify-between">
+          <p class="display font-bold text-[15px]">Virtual Binz</p>
+          <button id="sidebarClose" class="md:hidden text-slate-400 hover:text-slate-600 text-lg leading-none" aria-label="Close menu">✕</button>
+        </div>
+
+        <nav class="flex-1 px-3 py-4 space-y-1 text-sm overflow-y-auto">
+          <a href="#" class="side-link active flex items-center gap-3 px-3 py-2.5 rounded-lg font-medium">
+            <span class="dot w-1.5 h-1.5 rounded-full bg-slate-300"></span> Home
+          </a>
+          <a href="#" class="side-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600">
+            <span class="dot w-1.5 h-1.5 rounded-full bg-slate-300"></span> Contacts
+          </a>
+          <a href="#" class="side-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600">
+            <span class="dot w-1.5 h-1.5 rounded-full bg-slate-300"></span> Deals
+          </a>
+          <a href="#" class="side-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600">
+            <span class="dot w-1.5 h-1.5 rounded-full bg-slate-300"></span> Tasks
+          </a>
+          <a href="#" class="side-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600">
+            <span class="dot w-1.5 h-1.5 rounded-full bg-slate-300"></span> Reports
+          </a>
+          <a href="#" class="side-link flex items-center gap-3 px-3 py-2.5 rounded-lg text-slate-600">
+            <span class="dot w-1.5 h-1.5 rounded-full bg-slate-300"></span> Settings
+          </a>
+        </nav>
+
+        <!-- Logged-in user block, pinned to bottom -->
+        <div class="px-3 py-4 border-t border-slate-100">
+          <button id="userCard" class="user-card w-full flex items-center gap-3 px-2.5 py-2 rounded-xl text-left">
+            <div class="w-9 h-9 rounded-full bg-gradient-to-br from-teal-500 to-indigo-500 text-white text-xs flex items-center justify-center font-semibold shrink-0">
+              NR
+            </div>
+            <div class="min-w-0 flex-1">
+              <p id="sidebarUserName" class="text-sm font-medium truncate">Nagender Rao</p>
+              <p id="sidebarUserEmail" class="text-xs text-slate-500 truncate">nagender@gmail.com</p>
+            </div>
+          </button>
+          <p id="sidebarUserId" class="text-[11px] text-slate-400 mt-2 px-2.5 truncate">ID: —</p>
+        </div>
+      </aside>
+
+      <!-- Main -->
+      <div class="flex-1 min-w-0">
+        <!-- Hero -->
+        <section class="hero-glow px-6 pt-16 md:pt-10 pb-6">
+          <div class="max-w-5xl mx-auto">
+            <div class="flex items-start justify-between flex-wrap gap-4">
+              <div>
+                <h1 class="display text-3xl sm:text-4xl font-bold tracking-tight">Welcome, Nagender 👋</h1>
+                <p class="text-slate-600 mt-2">I wish you a very charming day.</p>
+              </div>
+              <div class="streak-badge flex items-center gap-2 bg-white border border-amber-200 rounded-full pl-2 pr-4 py-1.5 shadow-sm">
+                <span class="w-7 h-7 rounded-full bg-amber-100 flex items-center justify-center text-sm">🔥</span>
+                <div class="leading-tight">
+                  <p class="text-xs font-semibold text-amber-700">Today's Task are here</p>
+                  <p class="text-[11px] text-slate-500">Follow-ups on time</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <main class="max-w-5xl mx-auto px-6 pb-12 space-y-6">
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <div class="kpi-card count-up bg-white border border-slate-200 rounded-2xl p-4">
+              <div class="w-9 h-9 rounded-xl bg-teal-50 flex items-center justify-center text-base mb-3">🍁</div>
+              <p class="num text-2xl font-bold">128</p>
+              <p class="text-xs text-slate-500 mt-0.5">Open leads</p>
+            </div>
+            <div class="kpi-card count-up bg-white border border-slate-200 rounded-2xl p-4" style="animation-delay:60ms">
+              <div class="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center text-base mb-3">💸</div>
+              <p class="num text-2xl font-bold">34</p>
+              <p class="text-xs text-slate-500 mt-0.5">Active deals</p>
+            </div>
+            <div class="kpi-card count-up bg-white border border-slate-200 rounded-2xl p-4" style="animation-delay:120ms">
+              <div class="w-9 h-9 rounded-xl bg-emerald-50 flex items-center justify-center text-base mb-3">🏆</div>
+              <p class="num text-2xl font-bold">₹6.2L</p>
+              <p class="text-xs text-slate-500 mt-0.5">Won this month</p>
+            </div>
+            <div class="kpi-card count-up bg-white border border-slate-200 rounded-2xl p-4" style="animation-delay:180ms">
+              <div class="w-9 h-9 rounded-xl bg-rose-50 flex items-center justify-center text-base mb-3">💬</div>
+              <p class="num text-2xl font-bold">26%</p>
+              <p class="text-xs text-slate-500 mt-0.5">Conversion, -3pts</p>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            <!-- Pipeline funnel -->
+            <div class="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-5">
+              <div class="flex items-center justify-between mb-4">
+                <h2 class="font-semibold text-sm">Pipeline by stage</h2>
+                <button class="btn-primary text-white text-xs font-medium px-3.5 py-1.5 rounded-full">+ New deal</button>
+              </div>
+              <div class="space-y-3.5">
+                <div class="deal-card border border-slate-100 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium">New</p>
+                    <p class="text-xs text-slate-500">Sunrise Traders, Kabra Enterprises +39</p>
+                  </div>
+                  <div class="text-right">
+                    <p class="num text-sm font-semibold">41</p>
+                    <div class="w-24 h-1.5 bg-slate-100 rounded-full mt-1"><div class="h-1.5 rounded-full bg-gradient-to-r from-teal-500 to-indigo-500" style="width:70%"></div></div>
+                  </div>
+                </div>
+                <div class="deal-card border border-slate-100 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium">Contacted</p>
+                    <p class="text-xs text-slate-500">Meher Logistics, Priya Menon +27</p>
+                  </div>
+                  <div class="text-right">
+                    <p class="num text-sm font-semibold">29</p>
+                    <div class="w-24 h-1.5 bg-slate-100 rounded-full mt-1"><div class="h-1.5 rounded-full bg-gradient-to-r from-teal-500 to-indigo-500" style="width:50%"></div></div>
+                  </div>
+                </div>
+                <div class="deal-card border border-amber-200 bg-amber-50/40 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium">Proposal sent</p>
+                    <p class="text-xs text-amber-700">Arjun Textiles due today</p>
+                  </div>
+                  <div class="text-right">
+                    <p class="num text-sm font-semibold">18</p>
+                    <div class="w-24 h-1.5 bg-slate-100 rounded-full mt-1"><div class="h-1.5 rounded-full bg-gradient-to-r from-teal-500 to-indigo-500" style="width:30%"></div></div>
+                  </div>
+                </div>
+                <div class="deal-card border border-emerald-200 bg-emerald-50/40 rounded-xl p-3 flex items-center justify-between">
+                  <div>
+                    <p class="text-sm font-medium">Won</p>
+                    <p class="text-xs text-emerald-700">Rohit Sharma Co. closed yesterday</p>
+                  </div>
+                  <div class="text-right">
+                    <p class="num text-sm font-semibold">9</p>
+                    <div class="w-24 h-1.5 bg-slate-100 rounded-full mt-1"><div class="h-1.5 rounded-full bg-gradient-to-r from-teal-500 to-indigo-500" style="width:15%"></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tasks -->
+            <div class="bg-white border border-slate-200 rounded-2xl p-5">
+              <h2 class="font-semibold text-sm mb-4">Due today</h2>
+              <ul class="space-y-3.5">
+                <li class="flex items-start gap-3">
+                  <input type="checkbox" class="task-check mt-0.5" />
+                  <span class="text-sm">Call Priya Menon — renewal</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <input type="checkbox" class="task-check mt-0.5" />
+                  <span class="text-sm">Send proposal to Arjun Textiles</span>
+                </li>
+                <li class="flex items-start gap-3">
+                  <input type="checkbox" class="task-check mt-0.5" />
+                  <span class="text-sm">Follow up on Kavya's demo</span>
+                </li>
+              </ul>
+              <button class="w-full mt-5 text-sm font-medium text-teal-700 border border-teal-200 rounded-full py-2 hover:bg-teal-50 transition-colors">
+                View all tasks
+              </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    </div>
+
+    <script>
+      // Mobile sidebar drawer: slide in/out + backdrop, closes on backdrop
+      // click, close-button click, or resizing up past the md breakpoint.
+      const sidebar = document.getElementById("sidebar");
+      const backdrop = document.getElementById("sidebarBackdrop");
+      const openBtn = document.getElementById("sidebarToggle");
+      const closeBtn = document.getElementById("sidebarClose");
+
+      function openSidebar() {
+        sidebar.classList.remove("-translate-x-full");
+        backdrop.classList.remove("hidden");
+        openBtn.classList.add("hidden");
+        openBtn.setAttribute("aria-expanded", "true");
+      }
+      function closeSidebar() {
+        sidebar.classList.add("-translate-x-full");
+        backdrop.classList.add("hidden");
+        openBtn.classList.remove("hidden");
+        openBtn.setAttribute("aria-expanded", "false");
+      }
+
+      openBtn.addEventListener("click", openSidebar);
+      closeBtn.addEventListener("click", closeSidebar);
+      backdrop.addEventListener("click", closeSidebar);
+
+      // If the window is resized past the desktop breakpoint while the
+      // drawer is open, drop the mobile-only translate/backdrop state.
+      window.addEventListener("resize", () => {
+        if (window.innerWidth >= 768) closeSidebar();
+      });
+
+      // Pull the logged-in user (saved by login.html/signup.html after a
+      // successful auth call) and reflect it in the sidebar footer.
+      // Falls back to the placeholder markup already in the HTML if no
+      // one's actually logged in yet (e.g. previewing this file alone).
+      try {
+        const stored = localStorage.getItem("user");
+        if (stored) {
+          const user = JSON.parse(stored);
+          const nameEl = document.getElementById("sidebarUserName");
+          const emailEl = document.getElementById("sidebarUserEmail");
+          const idEl = document.getElementById("sidebarUserId");
+          const avatarEl = document.querySelector("aside .rounded-full.bg-gradient-to-br");
+
+          if (user.name) {
+            nameEl.textContent = user.name;
+            avatarEl.textContent = user.name
+              .split(" ")
+              .map((part) => part[0])
+              .join("")
+              .slice(0, 2)
+              .toUpperCase();
+          }
+          if (user.email) emailEl.textContent = user.email;
+          if (user.id) idEl.textContent = `ID: ${user.id}`;
+        }
+      } catch (err) {
+        console.error("Couldn't read logged-in user from storage:", err);
+      }
+    </script>
+  </body>
+</html>
