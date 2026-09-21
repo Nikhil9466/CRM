@@ -7,6 +7,8 @@ CREATE TABLE "users" (
     "phone" VARCHAR(10) NOT NULL,
     "orgId" TEXT NOT NULL,
     "photoUrl" TEXT,
+    "resetTokenHash" TEXT,
+    "resetTokenExpiry" TIMESTAMP(3),
     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" TIMESTAMP(3) NOT NULL,
 

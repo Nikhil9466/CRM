@@ -43,10 +43,8 @@ async function signup(req, res) {
 async function login(req, res) {
   try {
     const { email, password } = req.body;
-  
 
     const user = await prisma.user.findUnique({ where: { email } });
-    console.log(user)
     if (!user) {
       return res.status(401).json({ error: "Invalid email or password." });
     }
@@ -65,4 +63,33 @@ async function login(req, res) {
   }
 }
 
-module.exports = { signup, login };
+async function resetPassword(req, res) {
+  try {
+    const { email, orgId, password } = req.body;
+
+    const user = await prisma.user.findUnique({ where: { email } });
+
+    // Deliberately vague on failure — this shouldn't reveal whether the
+    // email exists, or what the correct orgId for it would be.
+    if (!user || user.orgId !== orgId) {
+      return res.status(400).json({
+        error:
+          "We couldn't verify that email and Organisation ID together. Double-check both and try again.",
+      });
+    }
+
+    const passwordHash = await bcrypt.hash(password, SALT_ROUNDS);
+
+    await prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash },
+    });
+
+    res.status(200).json({ message: "Password updated — you can log in now." });
+  } catch (err) {
+    console.error("Reset password error:", err);
+    res.status(500).json({ error: "Something went wrong." });
+  }
+}
+
+module.exports = { signup, login, resetPassword };

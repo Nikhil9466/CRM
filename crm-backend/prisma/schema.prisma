@@ -18,6 +18,8 @@ model User {
   phone        String   @unique @db.VarChar(10)
   orgId        String
   photoUrl     String?
+  resetTokenHash   String?
+  resetTokenExpiry DateTime?
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
