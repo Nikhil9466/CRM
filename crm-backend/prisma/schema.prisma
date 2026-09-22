@@ -1,0 +1,108 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// Existing account columns are preserved. All CRM routes derive orgId from
+// the authenticated account, never from client-provided scope.
+model User {
+  id               String    @id @default(uuid())
+  name             String    @db.VarChar(20)
+  email            String    @unique
+  passwordHash     String
+  phone            String    @unique @db.VarChar(10)
+  orgId            String
+  role             Role      @default(USER)
+  active           Boolean   @default(true)
+  sessionVersion   Int       @default(0)
+  photoUrl         String?
+  resetTokenHash   String?
+  resetTokenExpiry DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  @@map("users")
+}
+
+enum Role {
+  ADMIN
+  USER
+}
+
+enum StageKind {
+  OPEN
+  WON
+  LOST
+}
+
+model Organisation {
+  id        String   @id
+  createdAt DateTime @default(now())
+}
+
+model Contact {
+  id         String   @id @default(uuid())
+  orgId      String
+  name       String   @db.VarChar(120)
+  email      String?
+  phone      String?
+  company    String?  @db.VarChar(120)
+  assigneeId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  deals      Deal[]
+  tasks      Task[]
+
+  @@index([orgId, createdAt])
+}
+
+model Stage {
+  id       String    @id @default(uuid())
+  orgId    String
+  name     String    @db.VarChar(60)
+  kind     StageKind @default(OPEN)
+  position Int       @default(0)
+  deals    Deal[]
+
+  @@unique([orgId, name])
+  @@index([orgId, position])
+}
+
+model Deal {
+  id                String    @id @default(uuid())
+  orgId             String
+  title             String    @db.VarChar(160)
+  contactId         String
+  contact           Contact   @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  stageId           String
+  stage             Stage     @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  value             Decimal   @default(0) @db.Decimal(14, 2)
+  expectedCloseDate DateTime? @db.Date
+  closedAt          DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  tasks             Task[]
+
+  @@index([orgId, stageId])
+  @@index([orgId, closedAt])
+}
+
+model Task {
+  id        String    @id @default(uuid())
+  orgId     String
+  title     String    @db.VarChar(160)
+  dueDate   DateTime? @db.Date
+  completed Boolean   @default(false)
+  contactId String?
+  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  dealId    String?
+  deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: Restrict)
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@index([orgId, completed, dueDate])
+}

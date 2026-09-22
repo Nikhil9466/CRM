@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+!.env.example
+*.log
+*.zip
+coverage/
+.DS_Store
+Thumbs.db
+crm-backend/uploads/*
+!crm-backend/uploads/.gitkeep
