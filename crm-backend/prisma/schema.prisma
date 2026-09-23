@@ -7,8 +7,8 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// Existing account columns are preserved. All CRM routes derive orgId from
-// the authenticated account, never from client-provided scope.
+// Keep the existing account fields. Get orgId from the signed-in user,
+// not from whatever the browser sends.
 model User {
   id               String    @id @default(uuid())
   name             String    @db.VarChar(20)
@@ -16,27 +16,60 @@ model User {
   passwordHash     String
   phone            String    @unique @db.VarChar(10)
   orgId            String
-  role             Role      @default(USER)
+  role             Role      @default(EMPLOYEE)
   active           Boolean   @default(true)
   sessionVersion   Int       @default(0)
+  teamId           String?
+  team             Team?     @relation(fields: [teamId], references: [id], onDelete: SetNull)
   photoUrl         String?
   resetTokenHash   String?
   resetTokenExpiry DateTime?
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
+  contacts Contact[]
+  tasks    Task[]
+
   @@map("users")
 }
 
 enum Role {
   ADMIN
-  USER
+  EMPLOYEE
+  SUB_ADMIN
 }
 
 enum StageKind {
   OPEN
   WON
   LOST
+}
+
+model Team {
+  id        String        @id @default(uuid())
+  orgId     String
+  name      String        @db.VarChar(80)
+  leaderId  String?       @unique
+  members   User[]
+  requests  TeamRequest[]
+  createdAt DateTime      @default(now())
+
+  @@unique([orgId, name])
+}
+
+model TeamRequest {
+  id          String    @id @default(uuid())
+  orgId       String
+  teamId      String
+  team        Team      @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  employeeId  String
+  requestedBy String
+  status      String    @default("PENDING")
+  reviewedBy  String?
+  reviewedAt  DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@index([orgId, status])
 }
 
 model Organisation {
@@ -52,6 +85,7 @@ model Contact {
   phone      String?
   company    String?  @db.VarChar(120)
   assigneeId String?
+  assignee   User?    @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
   deals      Deal[]
@@ -92,17 +126,19 @@ model Deal {
 }
 
 model Task {
-  id        String    @id @default(uuid())
-  orgId     String
-  title     String    @db.VarChar(160)
-  dueDate   DateTime? @db.Date
-  completed Boolean   @default(false)
-  contactId String?
-  contact   Contact?  @relation(fields: [contactId], references: [id], onDelete: Restrict)
-  dealId    String?
-  deal      Deal?     @relation(fields: [dealId], references: [id], onDelete: Restrict)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
+  assigneeId String?
+  assignee   User?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  id         String    @id @default(uuid())
+  orgId      String
+  title      String    @db.VarChar(160)
+  dueDate    DateTime? @db.Date
+  completed  Boolean   @default(false)
+  contactId  String?
+  contact    Contact?  @relation(fields: [contactId], references: [id], onDelete: Restrict)
+  dealId     String?
+  deal       Deal?     @relation(fields: [dealId], references: [id], onDelete: Restrict)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   @@index([orgId, completed, dueDate])
 }

@@ -1,7 +1,7 @@
 {
   "name": "crm-backend",
   "version": "1.0.0",
-  "description": "Virtual Binz CRM — connected dashboard and role-protected CRM API",
+  "description": "Virtual Binz CRM \u2014 connected dashboard and role-protected CRM API",
   "main": "src/server.js",
   "type": "commonjs",
   "scripts": {
@@ -12,8 +12,8 @@
     "prisma:studio": "prisma studio",
     "db:deploy": "prisma migrate deploy",
     "admin:promote": "node scripts/admin.js",
-    "test": "node --test tests/unit.test.js",
-    "test:integration": "node --test tests/integration.test.js"
+    "test": "node --test tests/unit.test.js tests/session.test.js tests/login-limit.test.js",
+    "test:integration": "node --test tests/integration.test.js tests/teams.test.js tests/auth-regression.test.js"
   },
   "dependencies": {
     "@prisma/client": "^5.20.0",

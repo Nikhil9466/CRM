@@ -1,5 +1,9 @@
 require("dotenv").config();
-if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 32 || process.env.JWT_SECRET.startsWith("replace-with"))
+if (
+  !process.env.JWT_SECRET ||
+  process.env.JWT_SECRET.length < 32 ||
+  process.env.JWT_SECRET.startsWith("replace-with")
+)
   throw new Error("Set JWT_SECRET to a random secret of at least 32 characters in .env.");
 const app = require("./app");
 

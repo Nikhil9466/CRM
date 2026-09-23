@@ -1,7 +1,6 @@
 const { PrismaClient } = require("@prisma/client");
 
-// Reuse a single Prisma client across the app instead of creating a new
-// connection pool on every import.
+// Share one client so we don’t keep opening DB connections.
 const prisma = new PrismaClient();
 
 module.exports = prisma;

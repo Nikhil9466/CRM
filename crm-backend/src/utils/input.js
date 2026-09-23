@@ -1,4 +1,6 @@
-const fail = (message, status = 400) => { throw Object.assign(new Error(message), { status }); };
+const fail = (message, status = 400) => {
+  throw Object.assign(new Error(message), { status });
+};
 function text(value, label, max = 160, optional = false) {
   if (optional && (value === undefined || value === null || value === "")) return null;
   if (typeof value !== "string" || !value.trim() || value.trim().length > max)
@@ -7,14 +9,17 @@ function text(value, label, max = 160, optional = false) {
 }
 function date(value, label) {
   if (value === null || value === "" || value === undefined) return null;
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) fail(label + " must be YYYY-MM-DD.");
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value))
+    fail(label + " must be YYYY-MM-DD.");
   const parsed = new Date(value + "T00:00:00.000Z");
-  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0,10) !== value) fail(label + " is invalid.");
+  if (!Number.isFinite(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value)
+    fail(label + " is invalid.");
   return parsed;
 }
 function money(value) {
   const s = String(value ?? "");
-  if (!/^\d{1,12}(\.\d{1,2})?$/.test(s)) fail("Value must be a non-negative amount with at most two decimal places.");
+  if (!/^\d{1,12}(\.\d{1,2})?$/.test(s))
+    fail("Value must be a non-negative amount with at most two decimal places.");
   return s;
 }
 function choice(value, values, label) {
