@@ -1,42 +1,111 @@
 "use strict";
-// A remembered login is only a starting point for a new tab. Once opened,
-// each tab keeps its own account, even if another tab signs in or signs out.
+// The authentication cookie is HttpOnly: JavaScript never reads or stores it.
+// This in-memory token is only CSRF protection and cannot authenticate a request.
 window.crmSession = (() => {
-  const signedOut = "crm-signed-out";
-  function token() {
-    const current = sessionStorage.getItem("token");
-    if (current) return current;
-    if (sessionStorage.getItem(signedOut)) return null;
-    const remembered = localStorage.getItem("token");
-    if (remembered) sessionStorage.setItem("token", remembered);
-    return remembered;
+  for (const store of [localStorage, sessionStorage]) {
+    for (const key of [
+      "token",
+      "user",
+      "crm-signed-out",
+      "crm-remembered-user",
+    ])
+      store.removeItem(key);
   }
-  function save(value, remember, userId) {
-    if (typeof value !== "string" || !value) throw new Error("The server did not return a valid login. Please retry.");
-    sessionStorage.setItem("token", value);
-    sessionStorage.removeItem(signedOut);
-    sessionStorage.removeItem("user");
-    if (remember) {
-      localStorage.setItem("token", value);
-      if (userId) localStorage.setItem("crm-remembered-user", userId);
-    } else if (userId && localStorage.getItem("crm-remembered-user") === userId) {
-      // Opting out of remembering this tab must not remove another account.
-      localStorage.removeItem("token");
-      localStorage.removeItem("crm-remembered-user");
+  let csrfToken = null,
+    pending = null;
+  function noticeAndGo(message, path) {
+    if (message) sessionStorage.setItem("crm-login-message", message);
+    location.replace(path);
+  }
+  function signal(kind) {
+    localStorage.setItem(
+      "crm-auth-change",
+      JSON.stringify({ kind, nonce: crypto.randomUUID() }),
+    );
+  }
+  window.addEventListener("storage", (event) => {
+    if (event.key !== "crm-auth-change" || !event.newValue) return;
+    let value;
+    try {
+      value = JSON.parse(event.newValue);
+    } catch {
+      return;
     }
-    localStorage.removeItem("user");
+    if (!["login", "logout"].includes(value.kind)) return;
+    csrfToken = null;
+    noticeAndGo(
+      value.kind === "logout" ? "You were signed out in another tab." : "",
+      value.kind === "login" ? "home.html" : "login.html",
+    );
+  });
+  async function ensure() {
+    if (csrfToken) return csrfToken;
+    if (!pending)
+      pending = (async () => {
+        const res = await fetch("/api/auth/session", {
+          credentials: "same-origin",
+          cache: "no-store",
+          signal: AbortSignal.timeout(15000),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          if (res.status === 401) noticeAndGo(data.error, "login.html");
+          throw new Error(data.error || "Could not load your session.");
+        }
+        csrfToken = data.csrfToken;
+        return csrfToken;
+      })().finally(() => {
+        pending = null;
+      });
+    return pending;
   }
-  function clear(expected = token()) {
-    if (token() !== expected) return false; // Ignore stale network responses.
-    sessionStorage.removeItem("token");
-    sessionStorage.removeItem("user");
-    sessionStorage.setItem(signedOut, "1");
-    if (expected && localStorage.getItem("token") === expected) {
-      localStorage.removeItem("token");
-      localStorage.removeItem("crm-remembered-user");
-      localStorage.removeItem("user");
+  async function request(path, options = {}, authenticated = true) {
+    const protection = authenticated ? await ensure() : null;
+    const res = await fetch(path, {
+      ...options,
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: {
+        ...options.headers,
+        "X-CRM-Request": "1",
+        ...(protection ? { "X-CSRF-Token": protection } : {}),
+      },
+    });
+    if (authenticated && (res.status === 401 || res.status === 403)) {
+      const data = await res
+        .clone()
+        .json()
+        .catch(() => ({}));
+      if (res.status === 401) {
+        noticeAndGo(data.error || "Please sign in again.", "login.html");
+        throw new Error(data.error || "Please sign in again.");
+      }
+      if (data.code === "SESSION_CHANGED") {
+        csrfToken = null;
+        location.replace("home.html");
+        throw new Error(
+          "The browser account changed. Reloading your workspace.",
+        );
+      }
     }
-    return true;
+    return res;
   }
-  return { token, save, clear };
+  function signedIn(data) {
+    csrfToken = data.csrfToken;
+    signal("login");
+  }
+  function signedOut() {
+    csrfToken = null;
+    signal("logout");
+  }
+  async function logout() {
+    const res = await request("/api/auth/logout", {
+      method: "POST",
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) throw new Error("Could not sign out. Please retry.");
+    signedOut();
+    location.replace("login.html");
+  }
+  return { request, signedIn, signedOut, logout };
 })();

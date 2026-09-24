@@ -52,32 +52,25 @@ const roleLabel = (role) =>
   role;
 const isManager = () => ["ADMIN", "SUB_ADMIN"].includes(state.user?.role);
 const isAdmin = () => state.user?.role === "ADMIN";
-function token() { return window.crmSession.token(); }
-function logout(message = "", expected = token()) {
-  if (!window.crmSession.clear(expected)) return;
-  if (typeof message === "string" && message) sessionStorage.setItem("crm-login-message", message);
-  location.replace("login.html");
+async function logout() {
+  try {
+    await window.crmSession.logout();
+  } catch (err) {
+    notice(err.message, true);
+  }
 }
 async function api(path, method = "GET", body) {
   const controller = new AbortController(),
     timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const requestToken = token();
-    const res = await fetch("/api" + path, {
+    const res = await window.crmSession.request("/api" + path, {
       method,
       signal: controller.signal,
       headers: {
-        Authorization: "Bearer " + requestToken,
         ...(body ? { "Content-Type": "application/json" } : {}),
       },
       ...(body ? { body: JSON.stringify(body) } : {}),
     });
-    if (res.status === 401) {
-      const error = await res.json().catch(() => ({}));
-      const message = error.error || "Please log in again.";
-      logout(message, requestToken);
-      throw new Error(message);
-    }
     if (res.status === 204) return null;
     const data = await res.json();
     if (!res.ok)
@@ -496,6 +489,109 @@ function memberRows() {
     )
     .join("");
 }
+
+function renderHistory(data) {
+  const activity = state.view === "activity";
+  const types = activity
+    ? {
+        "": "All types",
+        contact: "Contacts",
+        deal: "Deals",
+        task: "Tasks",
+        user: "People & access",
+        team: "Teams",
+        teamRequest: "Team requests",
+        stage: "Pipeline stages",
+      }
+    : { contacts: "Contacts", deals: "Deals", tasks: "Tasks" };
+  const actions = {
+    created: "Created",
+    updated: "Updated",
+    deleted: "Deleted",
+    recycled: "Moved to recycle bin",
+    restored: "Restored",
+    password_changed: "Password changed",
+    member_removed: "Removed from team",
+    member_assigned: "Assigned to team",
+    addition_requested: "Requested team addition",
+    request_approved: "Approved team request",
+    request_rejected: "Rejected team request",
+  };
+  const fields = {
+    name: "Name",
+    title: "Title",
+    role: "Role",
+    active: "Active",
+    teamId: "Team",
+    leaderId: "Team leader",
+    employeeId: "Employee",
+    status: "Decision",
+    assigneeId: "Assigned to",
+    contactId: "Contact",
+    dealId: "Deal",
+    stageId: "Stage",
+    value: "Value",
+    completed: "Completed",
+    dueDate: "Due date",
+    expectedCloseDate: "Expected close",
+    position: "Position",
+    kind: "Outcome",
+  };
+  const showValue = (v, refs) =>
+    v === null
+      ? "Unassigned"
+      : (refs && Object.hasOwn(refs, v) ? refs[v] : null) ||
+        (typeof v === "boolean"
+          ? v
+            ? "Yes"
+            : "No"
+          : String(v).replaceAll("_", " "));
+  const rows = data.items
+    .map((item) => {
+      if (!activity)
+        return `<tr><td><strong>${esc(item.label)}</strong></td><td>${esc(new Date(item.deletedAt).toLocaleString())}</td><td>${esc(item.deletedByName)}</td><td><button class="button" data-restore="${esc(item.id)}" data-type="${esc(data.type)}">Restore</button></td></tr>`;
+      const details = Object.entries(item.details)
+        .filter(([key]) => fields[key])
+        .map(
+          ([key, value]) =>
+            `<div><strong>${esc(fields[key])}:</strong> ${item.details.previous && Object.hasOwn(item.details.previous, key) ? esc(showValue(item.details.previous[key], item.details.references)) + " → " : ""}${esc(showValue(value, item.details.references))}</div>`,
+        )
+        .join("");
+      return `<tr><td>${esc(new Date(item.createdAt).toLocaleString())}</td><td>${esc(item.actorName)}</td><td>${esc(actions[item.action] || item.action)}</td><td><strong>${esc(item.entityLabel)}</strong><small>${esc(types[item.entityType] || item.entityType)}</small></td><td>${details || "—"}</td></tr>`;
+    })
+    .join("");
+  $("content").innerHTML =
+    `<div class="settings-grid"><a href="#settings" class="text-button">← Team & settings</a><section class="panel"><form id="historyFilters" class="filters"><label>Record type<select name="type">${Object.entries(
+      types,
+    )
+      .map(
+        ([value, label]) =>
+          `<option value="${value}"${(state.filters.type || (activity ? "" : "contacts")) === value ? " selected" : ""}>${label}</option>`,
+      )
+      .join(
+        "",
+      )}</select></label><label>Search<input name="q" maxlength="120" value="${esc(state.filters.q || "")}" placeholder="${activity ? "Person, record or action" : "Record name"}"></label>${activity ? `<label>From<input type="date" name="from" value="${esc(state.filters.from || "")}"></label><label>To<input type="date" name="to" value="${esc(state.filters.to || "")}"></label>` : ""}<button class="button" type="submit">Apply filters</button><button class="text-button" type="button" id="clearHistory">Clear</button></form><p class="history-note">${activity ? "Only admins can view organisation history. Date filters use UTC. Passwords and session secrets are never recorded." : "Records stay here until restored. Restoring keeps their original assignments. Your current team permissions apply."}</p><div class="table-wrap"><table><thead><tr>${(activity ? ["When", "Changed by", "Action", "Record", "Details"] : ["Record", "Deleted on", "Deleted by", ""]).map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows || `<tr><td colspan="${activity ? 5 : 4}" class="empty">${activity ? "No activity matches these filters." : "No deleted records match these filters."}</td></tr>`}</tbody></table></div><div class="pager"><span>${data.total} records · Page ${data.page} of ${Math.max(1, Math.ceil(data.total / data.pageSize))}</span><div><button class="button" id="historyPrev"${data.page <= 1 ? " disabled" : ""}>Previous</button><button class="button" id="historyNext"${data.page * data.pageSize >= data.total ? " disabled" : ""}>Next</button></div></div></section></div>`;
+  $("historyFilters").onsubmit = (e) => {
+    e.preventDefault();
+    state.filters = Object.fromEntries(new FormData(e.target));
+    state.page = 1;
+    loadView();
+  };
+  $("clearHistory").onclick = () => {
+    state.filters = {};
+    state.page = 1;
+    loadView();
+  };
+  $("historyPrev").onclick = () => {
+    state.page--;
+    loadView();
+  };
+  $("historyNext").onclick = () => {
+    state.page++;
+    loadView();
+  };
+}
+
 function renderSettings() {
   const stages = state.stages
     .map(
@@ -504,7 +600,7 @@ function renderSettings() {
     )
     .join("");
   $("content").innerHTML =
-    `<div class="settings-grid"><a class="panel team-overview-link" href="#teams"><div><p class="eyebrow">TEAM MANAGEMENT</p><h2>Teams & performance</h2><p>${isAdmin() ? "Manage teams, review employee requests, and compare performance across your organisation." : "Manage your team, request employees, and follow everyone's progress."}</p></div><span aria-hidden="true">↗</span></a><section class="panel"><div class="panel-head"><div><h2>${isAdmin() ? "People & access" : "Your team members"}</h2><small>${isAdmin() ? "Admins control access. Appoint team leaders on the Teams & performance page." : "Remove employees here, or request additions from Teams & performance."}</small></div>${isAdmin() ? '<button class="button primary" data-new="members">+ Add employee</button>' : ""}</div><div class="table-wrap"><table><thead><tr><th>Member</th><th>Role</th><th>Team</th><th>Status</th><th>Actions</th></tr></thead><tbody>${memberRows()}</tbody></table></div></section>${isAdmin() ? `<section class="panel"><div class="panel-head"><div><h2>Pipeline stages</h2><small>Shared across the organisation. Outcome types stay fixed to protect reports.</small></div><button class="button" data-new="stages">+ Add stage</button></div><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Outcome</th><th>Position</th><th>Actions</th></tr></thead><tbody>${stages}</tbody></table></div></section>` : ""}</div>`;
+    `<div class="settings-grid"><div class="team-toolbar"><a class="button" href="#recycle-bin">Recycle bin</a>${isAdmin() ? '<a class="button" href="#activity">Activity history</a>' : ""}</div><a class="panel team-overview-link" href="#teams"><div><p class="eyebrow">TEAM MANAGEMENT</p><h2>Teams & performance</h2><p>${isAdmin() ? "Manage teams, review employee requests, and compare performance across your organisation." : "Manage your team, request employees, and follow everyone's progress."}</p></div><span aria-hidden="true">↗</span></a><section class="panel"><div class="panel-head people-access-head"><div><h2>${isAdmin() ? "People & access" : "Your team members"}</h2><small>${isAdmin() ? "Create employee creates a new CRM account. Assign existing employees and appoint team leaders under Teams & performance." : "Remove employees here, or request additions from Teams & performance."}</small></div>${isAdmin() ? '<button class="button primary" data-new="members">+ Create employee</button>' : ""}</div><div class="table-wrap"><table><thead><tr><th>Member</th><th>Role</th><th>Team</th><th>Status</th><th>Actions</th></tr></thead><tbody>${memberRows()}</tbody></table></div></section>${isAdmin() ? `<section class="panel"><div class="panel-head"><div><h2>Pipeline stages</h2><small>Shared across the organisation. Outcome types stay fixed to protect reports.</small></div><button class="button" data-new="stages">+ Add stage</button></div><div class="table-wrap"><table><thead><tr><th>Stage</th><th>Outcome</th><th>Position</th><th>Actions</th></tr></thead><tbody>${stages}</tbody></table></div></section>` : ""}</div>`;
 }
 function performanceTable(rows, team = false) {
   return `<div class="table-wrap"><table><thead><tr><th>${team ? "Team" : "Employee"}</th><th>${team ? "People" : "Team / role"}</th><th>Contacts</th><th>Deals</th><th>Won</th><th>Won value</th><th>Tasks completed</th></tr></thead><tbody>${rows.map((r) => `<tr><td><strong>${esc(r.name)}</strong>${!team && !r.active ? "<small>Inactive</small>" : ""}</td><td>${team ? r.members : `${esc(state.teams.find((t) => t.id === r.teamId)?.name || "Unassigned")}<small>${esc(roleLabel(r.role))}</small>`}</td><td>${r.contacts}</td><td>${r.deals}</td><td>${r.won}</td><td>${esc(currency(r.revenue))}</td><td><span>${r.completed} / ${r.tasks}</span><div class="track performance-track"><span style="width:${r.tasks ? (r.completed / r.tasks) * 100 : 0}%"></span></div></td></tr>`).join("") || '<tr><td colspan="7">No records yet.</td></tr>'}</tbody></table></div>`;
@@ -520,7 +616,7 @@ function renderTeams() {
             (m) => m.active && m.role === "EMPLOYEE" && m.teamId !== t.id,
           )
         : state.candidates;
-      return `<section class="panel team-card"><div class="panel-head"><div><h2>${esc(t.name)}</h2><small>Led by ${esc(state.members.find((m) => m.id === t.leaderId)?.name || "No leader assigned")}</small></div><span class="pill">${people.length} people</span></div><div class="team-card-body">${isAdmin() ? `<button class="text-button" data-edit-team="${esc(t.id)}">Edit team / appoint leader</button>` : ""}<ul class="team-roster">${people.map((m) => `<li><div><strong>${esc(m.name)}</strong><small>${esc(roleLabel(m.role))}${m.active ? "" : " · Inactive"}</small></div>${m.role === "EMPLOYEE" ? `<button class="text-button danger" data-remove-member="${esc(m.id)}" data-team="${esc(t.id)}">Remove</button>` : '<span class="badge">Leader</span>'}</li>`).join("") || "<li>No members yet.</li>"}</ul><form data-team-add="${esc(t.id)}" class="team-add-form"><label>${isAdmin() ? "Assign employee" : "Request an employee"}<select name="employeeId" required><option value="">Choose an employee</option>${candidates.map((m) => opt(m.id, m.name + " · " + m.email)).join("")}</select></label><button class="button" ${candidates.length ? "" : "disabled"}>${isAdmin() ? "Add to team" : "Request approval"}</button></form><small>${isAdmin() ? "Adding an employee transfers them from their current team, if any." : "An admin must approve additions. Removing a member keeps their account and work."}</small></div></section>`;
+      return `<section class="panel team-card"><div class="panel-head"><div><h2>${esc(t.name)}</h2><small>Led by ${esc(state.members.find((m) => m.id === t.leaderId)?.name || "No leader assigned")}</small></div><span class="pill">${people.length} people</span></div><div class="team-card-body">${isAdmin() ? `<button class="text-button" data-edit-team="${esc(t.id)}">Edit team / appoint leader</button>` : ""}<ul class="team-roster">${people.map((m) => `<li><div><strong>${esc(m.name)}</strong><small>${esc(roleLabel(m.role))}${m.active ? "" : " · Inactive"}</small></div>${m.role === "EMPLOYEE" ? `<button class="text-button danger" data-remove-member="${esc(m.id)}" data-team="${esc(t.id)}">Remove</button>` : '<span class="badge">Leader</span>'}</li>`).join("") || "<li>No members yet.</li>"}</ul><form data-team-add="${esc(t.id)}" class="team-add-form"><label>${isAdmin() ? "Assign employee" : "Request an employee"}<select name="employeeId" required><option value="">Choose an employee</option>${candidates.map((m) => opt(m.id, m.name + " · " + m.email)).join("")}</select></label><button class="button" ${candidates.length ? "" : "disabled"}>${isAdmin() ? "Assign employee" : "Request approval"}</button></form><small>${isAdmin() ? "Assign employee adds an existing CRM account to this team, transferring them from their current team, if any." : "An admin must approve additions. Removing a member keeps their account and work."}</small></div></section>`;
     })
     .join("");
   $("content").innerHTML =
@@ -533,15 +629,22 @@ async function loadView() {
   try {
     const user = await api("/me");
     if (version !== state.version) return;
-    const accessChanged = state.user && (state.user.role !== user.role || state.user.teamId !== user.teamId);
+    const accessChanged =
+      state.user &&
+      (state.user.role !== user.role || state.user.teamId !== user.teamId);
     state.user = user;
     renderIdentity();
     if (accessChanged) {
       $("editor").close();
       editing = null;
-      [state.members, state.stages] = await Promise.all([api("/members"), api("/stages")]);
+      [state.members, state.stages] = await Promise.all([
+        api("/members"),
+        api("/stages"),
+      ]);
       if (version !== state.version) return;
-      notice("Your access was updated. The workspace now reflects your current role and team.");
+      notice(
+        "Your access was updated. The workspace now reflects your current role and team.",
+      );
       navigate();
       return;
     }
@@ -569,6 +672,14 @@ async function loadView() {
         performance,
       });
       renderTeams();
+    } else if (["activity", "recycle-bin"].includes(state.view)) {
+      const params = new URLSearchParams({
+        ...state.filters,
+        page: state.page,
+      });
+      const data = await api("/" + state.view + "?" + params);
+      if (version !== state.version) return;
+      renderHistory(data);
     } else if (state.view === "settings") {
       if (!isManager()) throw new Error("Team management permission required.");
       const [members, stages, teams] = await Promise.all([
@@ -615,7 +726,8 @@ function navigate() {
     "deals",
     "tasks",
     "profile",
-    ...(isManager() ? ["settings", "teams"] : []),
+    ...(isManager() ? ["settings", "teams", "recycle-bin"] : []),
+    ...(isAdmin() ? ["activity"] : []),
   ].includes(view)
     ? view
     : "overview";
@@ -627,11 +739,13 @@ function navigate() {
     a.classList.toggle(
       "active",
       a.dataset.view === state.view ||
-        (state.view === "teams" && a.dataset.view === "settings"),
+        (["teams", "activity", "recycle-bin"].includes(state.view) &&
+          a.dataset.view === "settings"),
     );
     if (
       a.dataset.view === state.view ||
-      (state.view === "teams" && a.dataset.view === "settings")
+      (["teams", "activity", "recycle-bin"].includes(state.view) &&
+        a.dataset.view === "settings")
     )
       a.setAttribute("aria-current", "page");
     else a.removeAttribute("aria-current");
@@ -644,6 +758,8 @@ function navigate() {
     settings: "Team & settings",
     profile: "Your profile",
     teams: "Teams & performance",
+    activity: "Activity history",
+    "recycle-bin": "Recycle bin",
   };
   $("crumb").textContent = labels[state.view];
   document.title = labels[state.view] + " — Virtual Binz";
@@ -659,20 +775,21 @@ function navigate() {
     settings: "Keep your workspace organised and your team in control.",
     profile: "Your account, your team, and your access in one place.",
     teams: "A clear view of your people and their progress.",
+    activity: "Who changed what, and when. History starts with this update.",
+    "recycle-bin":
+      "Recover deleted work. Restore linked contacts before deals, and deals before tasks.",
   }[state.view];
   $("eyebrow").textContent =
     state.view === "overview"
       ? "YOUR WORKSPACE AT A GLANCE"
       : "YOUR SHARED WORKSPACE";
   $("add").hidden =
-    ["profile", "teams"].includes(state.view) ||
-    (state.view === "settings" && !isAdmin());
+    ["settings", "profile", "teams", "activity", "recycle-bin"].includes(state.view);
   $("add").textContent = {
     overview: "+ New deal",
     contacts: "+ Add contact",
     deals: "+ New deal",
     tasks: "+ Add task",
-    settings: "+ Add member",
   }[state.view];
   $("content").innerHTML = '<div class="empty panel">Loading…</div>';
   loadView();
@@ -691,11 +808,7 @@ $("refresh").onclick = async () => {
 };
 $("add").onclick = () =>
   openEditor(
-    state.view === "overview"
-      ? "deals"
-      : state.view === "settings"
-        ? "members"
-        : state.view,
+    state.view === "overview" ? "deals" : state.view,
   );
 const field = (name, label, value = "", type = "text", extra = "") =>
   "<label>" +
@@ -911,9 +1024,16 @@ async function openEditor(type, record) {
         ) +
         "<small>Open stages count toward pipeline value. Won stages count toward monthly wins. A stage in use cannot be deleted.</small>";
     } else if (type === "member-passwords") {
-      html = `<p>Set a new password for <strong>${esc(item.name)}</strong> (${esc(item.email)}). This signs out their existing sessions. Their role and active/inactive status stay the same.</p>` +
-        field("password", "New password (12+ characters)", "", "password", 'required minlength="12" autocomplete="new-password"') +
-        '<small>Share the new password privately. The member can change it from their profile after signing in.</small>';
+      html =
+        `<p>Set a new password for <strong>${esc(item.name)}</strong> (${esc(item.email)}). This signs out their existing sessions. Their role and active/inactive status stay the same.</p>` +
+        field(
+          "password",
+          "New password (12+ characters)",
+          "",
+          "password",
+          'required minlength="12" autocomplete="new-password"',
+        ) +
+        "<small>Share the new password privately. The member can change it from their profile after signing in.</small>";
     } else if (type === "members") {
       html =
         field("name", "Full name", "", "text", 'required maxlength="20"') +
@@ -953,16 +1073,18 @@ async function openEditor(type, record) {
       );
     editing = { type, item };
     $("editorTitle").textContent =
-      (item.id ? "Edit " : "New ") +
-      {
-        contacts: "contact",
-        deals: "deal",
-        tasks: "task",
-        stages: "stage",
-        members: "team member",
-        "member-passwords": "member password",
-        teams: "team",
-      }[type];
+      type === "members" && !item.id
+        ? "Create employee"
+        : (item.id ? "Edit " : "New ") +
+          {
+            contacts: "contact",
+            deals: "deal",
+            tasks: "task",
+            stages: "stage",
+            members: "team member",
+            "member-passwords": "member password",
+            teams: "team",
+          }[type];
     $("fields").innerHTML = html;
     window.addPasswordToggles($("fields"));
     $("formError").hidden = true;
@@ -976,7 +1098,10 @@ async function openEditor(type, record) {
 }
 $("closeEditor").onclick = $("cancelEditor").onclick = () =>
   $("editor").close();
-$("editor").addEventListener("close", () => { $("fields").replaceChildren(); editing = null; });
+$("editor").addEventListener("close", () => {
+  $("fields").replaceChildren();
+  editing = null;
+});
 $("editorForm").onsubmit = async (e) => {
   e.preventDefault();
   if (!editing) return;
@@ -1002,7 +1127,13 @@ $("editorForm").onsubmit = async (e) => {
     $("editor").close();
     $("fields").replaceChildren();
     editing = null;
-    notice(type === "members" ? "Account created. Share the email and initial password privately. Role changes keep the same password." : "Saved successfully.");
+    notice(
+      type === "members"
+        ? "Account created. Share the email and initial password privately. Role changes keep the same password."
+        : type === "member-passwords"
+          ? "Password reset. Share the new password privately. Account activation and role are unchanged."
+          : "Saved successfully.",
+    );
     if (type === "stages") state.stages = await api("/stages");
     if (type === "members") state.members = await api("/members");
     await loadView();
@@ -1017,7 +1148,11 @@ $("content").addEventListener("click", async (e) => {
   const b = e.target.closest("button");
   if (!b) return;
   try {
-    if (b.dataset.resetPassword) return openEditor("member-passwords", state.members.find(m => m.id === b.dataset.resetPassword));
+    if (b.dataset.resetPassword)
+      return openEditor(
+        "member-passwords",
+        state.members.find((m) => m.id === b.dataset.resetPassword),
+      );
     if (b.dataset.switchAccount) return logout();
     if (b.dataset.new) return openEditor(b.dataset.new);
     if (b.dataset.editTeam)
@@ -1063,16 +1198,33 @@ $("content").addEventListener("click", async (e) => {
           : await api("/" + b.dataset.edit + "/" + b.dataset.id);
       return openEditor(b.dataset.edit, item);
     }
+    if (b.dataset.restore) {
+      b.disabled = true;
+      await api(
+        "/recycle-bin/" + b.dataset.type + "/" + b.dataset.restore + "/restore",
+        "POST",
+      );
+      notice(
+        "Record restored. Review its assignment if team membership has changed.",
+      );
+      return loadView();
+    }
     if (b.dataset.delete) {
       if (
         !confirm(
-          "Permanently delete this record? There is no recycle bin. Linked records must be removed or unlinked first.",
+          b.dataset.delete === "stages"
+            ? "Permanently delete this unused pipeline stage? Stages are not kept in the recycle bin."
+            : "Move this record to the recycle bin? It will disappear from normal views and reports. You can restore it later. Move linked records to the bin or unlink them first.",
         )
       )
         return;
       b.disabled = true;
       await api("/" + b.dataset.delete + "/" + b.dataset.id, "DELETE");
-      notice("Record permanently deleted.");
+      notice(
+        b.dataset.delete === "stages"
+          ? "Pipeline stage deleted."
+          : "Record moved to the recycle bin.",
+      );
       if (b.dataset.delete === "stages") state.stages = await api("/stages");
       await loadView();
     }
@@ -1233,20 +1385,19 @@ $("searchResults").onclick = async (e) => {
   }
 };
 function renderIdentity() {
-    $("userName").textContent = state.user.name;
-    $("userRole").textContent = roleLabel(state.user.role);
-    $("workspaceName").textContent = state.user.orgId;
-    const initials = state.user.name
-      .split(/\s+/)
-      .map((p) => p[0])
-      .join("")
-      .slice(0, 2)
-      .toUpperCase();
-    $("avatar").textContent = $("headerAvatar").textContent = initials;
-    $("settingsNav").hidden = !isManager();
+  $("userName").textContent = state.user.name;
+  $("userRole").textContent = roleLabel(state.user.role);
+  $("workspaceName").textContent = state.user.orgId;
+  const initials = state.user.name
+    .split(/\s+/)
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2)
+    .toUpperCase();
+  $("avatar").textContent = $("headerAvatar").textContent = initials;
+  $("settingsNav").hidden = !isManager();
 }
 async function init() {
-  if (!token()) return logout();
   try {
     [state.user, state.stages, state.members] = await Promise.all([
       api("/me"),
