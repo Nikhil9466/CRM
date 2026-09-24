@@ -27,6 +27,7 @@ model User {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
+  sessions Session[]
   contacts Contact[]
   tasks    Task[]
 
@@ -78,19 +79,22 @@ model Organisation {
 }
 
 model Contact {
-  id         String   @id @default(uuid())
+  deletedAt  DateTime?
+  deletedBy  String?
+  id         String    @id @default(uuid())
   orgId      String
-  name       String   @db.VarChar(120)
+  name       String    @db.VarChar(120)
   email      String?
   phone      String?
-  company    String?  @db.VarChar(120)
+  company    String?   @db.VarChar(120)
   assigneeId String?
-  assignee   User?    @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  assignee   User?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
   deals      Deal[]
   tasks      Task[]
 
+  @@index([orgId, deletedAt])
   @@index([orgId, createdAt])
 }
 
@@ -107,6 +111,8 @@ model Stage {
 }
 
 model Deal {
+  deletedAt         DateTime?
+  deletedBy         String?
   id                String    @id @default(uuid())
   orgId             String
   title             String    @db.VarChar(160)
@@ -121,11 +127,14 @@ model Deal {
   updatedAt         DateTime  @updatedAt
   tasks             Task[]
 
+  @@index([orgId, deletedAt])
   @@index([orgId, stageId])
   @@index([orgId, closedAt])
 }
 
 model Task {
+  deletedAt  DateTime?
+  deletedBy  String?
   assigneeId String?
   assignee   User?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
   id         String    @id @default(uuid())
@@ -140,5 +149,35 @@ model Task {
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
 
+  @@index([orgId, deletedAt])
   @@index([orgId, completed, dueDate])
+}
+
+model Session {
+  idHash         String   @id
+  userId         String
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  sessionVersion Int
+  csrfToken      String
+  expiresAt      DateTime
+  createdAt      DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// Application history is append-only. No credential values are recorded.
+model Activity {
+  id          String   @id @default(uuid())
+  orgId       String
+  actorId     String
+  actorName   String
+  action      String
+  entityType  String
+  entityId    String?
+  entityLabel String
+  details     Json
+  createdAt   DateTime @default(now())
+
+  @@index([orgId, createdAt, id])
 }

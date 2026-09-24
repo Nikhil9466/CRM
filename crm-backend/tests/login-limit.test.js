@@ -1,10 +1,70 @@
-const test=require('node:test'), assert=require('node:assert/strict'),{EventEmitter}=require('node:events');
-const {createLoginLimit}=require('../src/middleware/loginLimit');
-function request(middleware,email,status=401,ip='local') {
- const res=new EventEmitter();res.statusCode=200;res.headers={};res.set=(k,v)=>res.headers[k]=v;res.status=n=>(res.statusCode=n,res);res.json=body=>(res.body=body,res);let allowed=false;
- middleware({ip,body:{email}},res,()=>{allowed=true;res.statusCode=status;res.emit('finish')});return {allowed,...res};
+const test = require("node:test"),
+  assert = require("node:assert/strict"),
+  { EventEmitter } = require("node:events");
+const { createLoginLimit } = require("../src/middleware/loginLimit");
+function request(middleware, email, status = 401, ip = "local") {
+  const res = new EventEmitter();
+  res.statusCode = 200;
+  res.headers = {};
+  res.set = (k, v) => (res.headers[k] = v);
+  res.status = (n) => ((res.statusCode = n), res);
+  res.json = (body) => ((res.body = body), res);
+  let allowed = false;
+  middleware({ ip, body: { email } }, res, () => {
+    allowed = true;
+    res.statusCode = status;
+    res.emit("finish");
+  });
+  return { allowed, ...res };
 }
-test('successful logins do not lock out an office or localhost',()=>{const limit=createLoginLimit();for(let i=0;i<150;i++)assert.equal(request(limit,'admin@example.test',200).allowed,true);assert.equal(request(limit,'employee@example.test',200).allowed,true)});
-test('failed login quota isolates accounts, normalizes email and sends accurate retry time',()=>{let time=0;const limit=createLoginLimit({now:()=>time});for(let i=0;i<10;i++)assert.equal(request(limit,' A@EXAMPLE.TEST ').allowed,true);let blocked=request(limit,'a@example.test');assert.equal(blocked.statusCode,429);assert.equal(blocked.headers['Retry-After'],'900');assert.equal(request(limit,'b@example.test',200).allowed,true);time=60_000;assert.equal(request(limit,'a@example.test').headers['Retry-After'],'840');time=900_001;assert.equal(request(limit,'a@example.test',200).allowed,true)});
-test('IP safety net limits distributed account guesses without blocking other IPs',()=>{const limit=createLoginLimit({ipMax:12});for(let i=0;i<12;i++)request(limit,'user'+i);assert.equal(request(limit,'another').statusCode,429);assert.equal(request(limit,'another',200,'other-ip').allowed,true)});
-test('successful authentication clears account failures; server errors do not count',()=>{const limit=createLoginLimit({accountMax:2});request(limit,'a');request(limit,'a',200);assert.equal(request(limit,'a').allowed,true);assert.equal(request(limit,'a',500).allowed,true);assert.equal(request(limit,'a',200).allowed,true)});
+test("successful logins do not lock out an office or localhost", () => {
+  const limit = createLoginLimit();
+  for (let i = 0; i < 150; i++)
+    assert.equal(request(limit, "admin@example.test", 200).allowed, true);
+  assert.equal(request(limit, "employee@example.test", 200).allowed, true);
+});
+test("failed login quota isolates accounts, normalizes email and sends accurate retry time", () => {
+  let time = 0;
+  const limit = createLoginLimit({ now: () => time });
+  for (let i = 0; i < 10; i++)
+    assert.equal(request(limit, " A@EXAMPLE.TEST ").allowed, true);
+  let blocked = request(limit, "a@example.test");
+  assert.equal(blocked.statusCode, 429);
+  assert.equal(blocked.headers["Retry-After"], "900");
+  assert.equal(request(limit, "b@example.test", 200).allowed, true);
+  time = 60_000;
+  assert.equal(request(limit, "a@example.test").headers["Retry-After"], "840");
+  time = 900_001;
+  assert.equal(request(limit, "a@example.test", 200).allowed, true);
+});
+test("IP safety net limits distributed account guesses without blocking other IPs", () => {
+  const limit = createLoginLimit({ ipMax: 12 });
+  for (let i = 0; i < 12; i++) request(limit, "user" + i);
+  assert.equal(request(limit, "another").statusCode, 429);
+  assert.equal(request(limit, "another", 200, "other-ip").allowed, true);
+});
+test("successful authentication clears account failures; server errors do not count", () => {
+  const limit = createLoginLimit({ accountMax: 2 });
+  request(limit, "a");
+  request(limit, "a", 200);
+  assert.equal(request(limit, "a").allowed, true);
+  assert.equal(request(limit, "a", 500).allowed, true);
+  assert.equal(request(limit, "a", 200).allowed, true);
+});
+test("concurrent guesses reserve quota before password checks complete", () => {
+  const limit = createLoginLimit({ accountMax: 2 });
+  const pending = [];
+  for (let i = 0; i < 2; i++) {
+    const res = new EventEmitter();
+    res.statusCode = 200;
+    limit({ ip: "local", body: { email: "a" } }, res, () => pending.push(res));
+  }
+  assert.equal(pending.length, 2);
+  assert.equal(request(limit, "a").statusCode, 429);
+  pending[0].emit("finish");
+  assert.equal(request(limit, "a", 200).allowed, true);
+  pending[1].statusCode = 401;
+  pending[1].emit("finish");
+  pending[1].emit("close");
+  assert.equal(request(limit, "a", 200).allowed, true);
+});

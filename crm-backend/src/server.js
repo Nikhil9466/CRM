@@ -1,10 +1,11 @@
 require("dotenv").config();
 if (
-  !process.env.JWT_SECRET ||
-  process.env.JWT_SECRET.length < 32 ||
-  process.env.JWT_SECRET.startsWith("replace-with")
+  process.env.NODE_ENV === "production" &&
+  !process.env.APP_ORIGIN?.startsWith("https://")
 )
-  throw new Error("Set JWT_SECRET to a random secret of at least 32 characters in .env.");
+  throw new Error(
+    "Set APP_ORIGIN to the HTTPS origin serving this CRM in production.",
+  );
 const app = require("./app");
 
 const PORT = process.env.PORT || 4000;

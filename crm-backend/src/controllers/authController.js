@@ -1,12 +1,17 @@
 const bcrypt = require("bcrypt");
 const prisma = require("../config/prisma");
-const { signToken } = require("../utils/jwt");
+const { createSession } = require("../utils/sessions");
 const { publicSelect } = require("../middleware/auth");
 const { account, text, fail } = require("../utils/input");
 const stages = require("../utils/stages");
 
 async function signup(req, res, next) {
   try {
+    if (
+      req.body.remember !== undefined &&
+      typeof req.body.remember !== "boolean"
+    )
+      fail("Remember must be true or false.");
     const { password, ...fields } = account(req.body);
     const orgId = text(req.body.orgId, "Organisation ID", 80);
     const passwordHash = await bcrypt.hash(password, 12);
@@ -23,13 +28,24 @@ async function signup(req, res, next) {
         select: publicSelect,
       });
     });
-    res.status(201).json({ user, token: signToken({ userId: user.id }) });
+    const csrfToken = await createSession(
+      req,
+      res,
+      user,
+      req.body.remember === true,
+    );
+    res.status(201).json({ user, csrfToken });
   } catch (err) {
     next(err);
   }
 }
 async function login(req, res, next) {
   try {
+    if (
+      req.body.remember !== undefined &&
+      typeof req.body.remember !== "boolean"
+    )
+      fail("Remember must be true or false.");
     const email = text(req.body.email, "Email", 254).toLowerCase();
     if (
       typeof req.body.password !== "string" ||
@@ -41,9 +57,20 @@ async function login(req, res, next) {
     if (!user || !(await bcrypt.compare(req.body.password, user.passwordHash)))
       return res.status(401).json({ error: "Invalid email or password." });
     if (!user.active)
-      return res.status(403).json({ error: "This account is deactivated. Ask your administrator to activate it in Team & settings." });
-    const safe = Object.fromEntries(Object.keys(publicSelect).map((key) => [key, user[key]]));
-    res.json({ user: safe, token: signToken({ userId: user.id, version: user.sessionVersion }) });
+      return res.status(403).json({
+        error:
+          "This account is deactivated. Ask your administrator to activate it in Team & settings.",
+      });
+    const safe = Object.fromEntries(
+      Object.keys(publicSelect).map((key) => [key, user[key]]),
+    );
+    const csrfToken = await createSession(
+      req,
+      res,
+      user,
+      req.body.remember === true,
+    );
+    res.json({ user: safe, csrfToken });
   } catch (err) {
     next(err);
   }

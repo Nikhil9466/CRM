@@ -1,11 +1,9 @@
 const router = require("express").Router();
-const prisma = require("../config/prisma");
+const { db: prisma, wrap } = require("../utils/changes");
 const { Prisma } = require("@prisma/client");
 const { admin, manager, publicSelect } = require("../middleware/auth");
 const { fail, text, choice } = require("../utils/input");
 const { memberScope, recordScope } = require("../utils/access");
-const wrap = (fn) => (req, res, next) =>
-  Promise.resolve(fn(req, res)).catch(next);
 const org = (req) => ({ orgId: req.user.orgId });
 // Serialize membership and approval changes, and recheck the actor after the lock.
 async function change(req, fn) {
@@ -349,11 +347,17 @@ router.get(
           }),
           tx.contact.groupBy({
             by: ["assigneeId"],
-            where: { ...org(req), assigneeId: { in: ids } },
+            where: {
+              ...recordScope(req.user, "contact"),
+              assigneeId: { in: ids },
+            },
             _count: { _all: true },
           }),
           tx.deal.findMany({
-            where: { ...org(req), contact: { assigneeId: { in: ids } } },
+            where: {
+              ...recordScope(req.user, "deal"),
+              contact: { assigneeId: { in: ids }, deletedAt: null },
+            },
             select: {
               value: true,
               contact: { select: { assigneeId: true } },

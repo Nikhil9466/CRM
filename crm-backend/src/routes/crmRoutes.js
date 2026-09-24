@@ -1,5 +1,5 @@
 const router = require("express").Router();
-const prisma = require("../config/prisma");
+const { db: prisma, wrap } = require("../utils/changes");
 const bcrypt = require("bcrypt");
 const { Prisma } = require("@prisma/client");
 const {
@@ -9,8 +9,6 @@ const {
   publicSelect,
 } = require("../middleware/auth");
 const { fail, text, date, money, choice, account } = require("../utils/input");
-const wrap = (fn) => (req, res, next) =>
-  Promise.resolve(fn(req, res)).catch(next);
 const { recordScope, memberScope } = require("../utils/access");
 const scope = (req, model) => recordScope(req.user, model);
 const contains = (value) => ({ contains: value, mode: "insensitive" });
@@ -28,6 +26,7 @@ async function own(model, id, user, db = prisma) {
 }
 router.use(authenticate);
 router.use(require("./teamRoutes"));
+router.use(require("./historyRoutes"));
 router.get(
   "/me",
   wrap(async (req, res) =>
@@ -59,13 +58,20 @@ router.post(
     const user = await prisma.user.findUnique({ where: { id: req.user.id } });
     if (!(await bcrypt.compare(req.body.currentPassword, user.passwordHash)))
       fail("Current password is incorrect.");
-    await prisma.user.update({
-      where: { id: user.id },
+    const changed = await prisma.user.updateMany({
+      where: {
+        id: user.id,
+        active: true,
+        passwordHash: user.passwordHash,
+        sessionVersion: user.sessionVersion,
+      },
       data: {
         passwordHash: await bcrypt.hash(password, 12),
         sessionVersion: { increment: 1 },
       },
     });
+    if (!changed.count)
+      fail("Your account changed while saving. Sign in again and retry.", 409);
     res.json({
       message: "Password changed. Please log in again on all devices.",
     });
@@ -75,19 +81,34 @@ router.patch(
   "/member-passwords/:id",
   admin,
   wrap(async (req, res) => {
-    if (req.params.id === req.user.id) fail("Change your own password from your profile.");
+    if (req.params.id === req.user.id)
+      fail("Change your own password from your profile.");
     const password = req.body.password;
-    if (typeof password !== "string" || password.length < 12 || Buffer.byteLength(password) > 72)
+    if (
+      typeof password !== "string" ||
+      password.length < 12 ||
+      Buffer.byteLength(password) > 72
+    )
       fail("New password must be 12+ characters and at most 72 UTF-8 bytes.");
     const passwordHash = await bcrypt.hash(password, 12);
-    await prisma.$transaction(async tx => {
-      await tx.$queryRawUnsafe('SELECT "id" FROM "Organisation" WHERE "id" = $1 FOR UPDATE', req.user.orgId);
+    await prisma.$transaction(async (tx) => {
+      await tx.$queryRawUnsafe(
+        'SELECT "id" FROM "Organisation" WHERE "id" = $1 FOR UPDATE',
+        req.user.orgId,
+      );
       const actor = await own("user", req.user.id, req.user, tx);
-      if (!actor.active || actor.role !== "ADMIN") fail("Administrator permission required.", 403);
+      if (!actor.active || actor.role !== "ADMIN")
+        fail("Administrator permission required.", 403);
       const target = await own("user", req.params.id, req.user, tx);
-      await tx.user.update({ where: { id: target.id }, data: { passwordHash, sessionVersion: { increment: 1 } } });
+      await tx.user.update({
+        where: { id: target.id },
+        data: { passwordHash, sessionVersion: { increment: 1 } },
+      });
     });
-    res.json({ message: "Password updated. Existing sessions were signed out; account activation and role are unchanged." });
+    res.json({
+      message:
+        "Password updated. Existing sessions were signed out; account activation and role are unchanged.",
+    });
   }),
 );
 router.get(
@@ -253,7 +274,10 @@ router.delete(
         where: { stageId: req.params.id, ...scope(req) },
       })
     )
-      fail("Move deals out of this stage before deleting it.", 409);
+      fail(
+        "Move deals out of this stage before deleting it. Restore any recycled deals in this stage first.",
+        409,
+      );
     await prisma.stage.delete({ where: { id: req.params.id } });
     res.status(204).end();
   }),
@@ -338,13 +362,11 @@ async function contactData(req, old) {
 router.post(
   "/contacts",
   wrap(async (req, res) => {
-    res
-      .status(201)
-      .json(
-        await prisma.contact.create({
-          data: { ...scope(req), ...(await contactData(req)) },
-        }),
-      );
+    res.status(201).json(
+      await prisma.contact.create({
+        data: { ...scope(req), ...(await contactData(req)) },
+      }),
+    );
   }),
 );
 router.patch(
@@ -366,14 +388,17 @@ router.delete(
     await own("contact", req.params.id, req.user);
     if (
       (await prisma.deal.count({
-        where: { contactId: req.params.id, ...scope(req) },
+        where: { contactId: req.params.id, deletedAt: null, ...scope(req) },
       })) ||
       (await prisma.task.count({
-        where: { contactId: req.params.id, ...scope(req) },
+        where: { contactId: req.params.id, deletedAt: null, ...scope(req) },
       }))
     )
       fail("Unlink or delete this contact's deals and tasks first.", 409);
-    await prisma.contact.delete({ where: { id: req.params.id } });
+    await prisma.contact.update({
+      where: { id: req.params.id },
+      data: { deletedAt: new Date(), deletedBy: req.user.id },
+    });
     res.status(204).end();
   }),
 );
@@ -449,11 +474,14 @@ router.delete(
     await own("deal", req.params.id, req.user);
     if (
       await prisma.task.count({
-        where: { dealId: req.params.id, ...scope(req) },
+        where: { dealId: req.params.id, deletedAt: null, ...scope(req) },
       })
     )
       fail("Unlink or delete this deal's tasks first.", 409);
-    await prisma.deal.delete({ where: { id: req.params.id } });
+    await prisma.deal.update({
+      where: { id: req.params.id },
+      data: { deletedAt: new Date(), deletedBy: req.user.id },
+    });
     res.status(204).end();
   }),
 );
@@ -555,7 +583,10 @@ router.delete(
   manager,
   wrap(async (req, res) => {
     await own("task", req.params.id, req.user);
-    await prisma.task.delete({ where: { id: req.params.id } });
+    await prisma.task.update({
+      where: { id: req.params.id },
+      data: { deletedAt: new Date(), deletedBy: req.user.id },
+    });
     res.status(204).end();
   }),
 );

@@ -6,8 +6,22 @@ function memberScope(user) {
     return { ...base, teamId: user.teamId };
   return { ...base, id: user.id };
 }
-function recordScope(user, model) {
+function recordScope(user, model, includeDeleted = false) {
   const base = { orgId: user.orgId };
+  if (!includeDeleted && ["contact", "deal", "task"].includes(model)) {
+    base.deletedAt = null;
+    if (model === "deal") base.contact = { deletedAt: null };
+    if (model === "task")
+      base.AND = [
+        {
+          OR: [
+            { contactId: null, dealId: null },
+            { contact: { deletedAt: null } },
+            { deal: { deletedAt: null, contact: { deletedAt: null } } },
+          ],
+        },
+      ];
+  }
   if (user.role === "ADMIN" || !model || model === "stage") return base;
   if (model === "user") return memberScope(user);
   const assignment =
@@ -19,6 +33,7 @@ function recordScope(user, model) {
     return {
       ...base,
       AND: [
+        ...(base.AND || []),
         assignment,
         {
           OR: [

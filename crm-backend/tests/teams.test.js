@@ -1,10 +1,10 @@
+const { headers, attachSession } = require("./helpers/client");
 // Run only against a dedicated disposable database, never the user's CRM data.
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const { randomUUID } = require("node:crypto");
 const enabled = process.env.CRM_TEST_DATABASE_URL;
 if (enabled) process.env.DATABASE_URL = enabled;
-process.env.JWT_SECRET ||= "integration-only-secret-at-least-32-characters";
 test(
   "teams: approval workflow, role boundaries, scoped CRUD/search/reports and profile",
   { skip: !enabled, timeout: 90000 },
@@ -17,13 +17,10 @@ test(
     const suffix = randomUUID().slice(0, 8),
       orgId = "teams-" + suffix;
     let counter = 0;
-    async function api(path, token, method = "GET", body, status = 200) {
+    async function api(path, session, method = "GET", body, status = 200) {
       const res = await fetch(base + path, {
         method,
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: "Bearer " + token } : {}),
-        },
+        headers: headers(session),
         ...(body ? { body: JSON.stringify(body) } : {}),
       });
       const data = res.status === 204 ? null : await res.json();
@@ -32,7 +29,7 @@ test(
         status,
         `${method} ${path}: ${JSON.stringify(data)}`,
       );
-      return data;
+      return attachSession(data, res);
     }
     function account(name) {
       return {
@@ -50,7 +47,7 @@ test(
         { ...account("Admin"), orgId },
         201,
       );
-      const at = admin.token;
+      const at = admin.session;
       async function member(name) {
         const body = account(name);
         const user = await api("/members", at, "POST", body, 201);
@@ -58,7 +55,7 @@ test(
           email: body.email,
           password: body.password,
         });
-        return { ...user, token: login.token };
+        return { ...user, session: login.session };
       }
       const l1 = await member("Leader1"),
         l2 = await member("Leader2"),
@@ -81,7 +78,7 @@ test(
       );
       await api(`/teams/${t1.id}/members`, at, "POST", { employeeId: e1.id });
       await api(`/teams/${t2.id}/members`, at, "POST", { employeeId: e2.id });
-      const profile = await api("/me", l1.token);
+      const profile = await api("/me", l1.session);
       assert.equal(profile.role, "SUB_ADMIN");
       assert.equal(profile.team.name, "Alpha");
       assert.equal(
@@ -91,36 +88,42 @@ test(
       );
       assert.ok(profile.createdAt);
       assert.equal(profile.passwordHash, undefined);
-      assert.equal((await api("/members", l1.token)).length, 2);
-      assert.equal((await api("/members", e1.token)).length, 1);
-      await api("/teams", e1.token, "GET", null, 403);
-      await api("/performance", e1.token, "GET", null, 403);
-      await api("/members", l1.token, "POST", account("Forbidden"), 403);
-      await api("/members/" + e1.id, l1.token, "PATCH", { role: "ADMIN" }, 403);
+      assert.equal((await api("/members", l1.session)).length, 2);
+      assert.equal((await api("/members", e1.session)).length, 1);
+      await api("/teams", e1.session, "GET", null, 403);
+      await api("/performance", e1.session, "GET", null, 403);
+      await api("/members", l1.session, "POST", account("Forbidden"), 403);
+      await api(
+        "/members/" + e1.id,
+        l1.session,
+        "PATCH",
+        { role: "ADMIN" },
+        403,
+      );
       await api(
         "/teams",
-        l1.token,
+        l1.session,
         "POST",
         { name: "Nope", leaderId: spare.id },
         403,
       );
       await api(
         `/teams/${t1.id}/members`,
-        l1.token,
+        l1.session,
         "POST",
         { employeeId: spare.id },
         403,
       );
       await api(
         `/teams/${t2.id}/members/${e2.id}`,
-        l1.token,
+        l1.session,
         "DELETE",
         null,
         403,
       );
       await api(
         `/teams/${t2.id}/requests`,
-        l1.token,
+        l1.session,
         "POST",
         { employeeId: spare.id },
         403,
@@ -128,22 +131,22 @@ test(
       await api("/members/" + e1.id, at, "PATCH", { role: "SUB_ADMIN" }, 400);
       const request = await api(
         `/teams/${t1.id}/requests`,
-        l1.token,
+        l1.session,
         "POST",
         { employeeId: spare.id },
         201,
       );
-      assert.equal((await api("/me", spare.token)).teamId, null);
+      assert.equal((await api("/me", spare.session)).teamId, null);
       await api(
         `/teams/${t1.id}/requests`,
-        l1.token,
+        l1.session,
         "POST",
         { employeeId: spare.id },
         409,
       );
       await api(
         "/team-requests/" + request.id,
-        l1.token,
+        l1.session,
         "PATCH",
         { status: "APPROVED" },
         403,
@@ -158,19 +161,19 @@ test(
         { status: "APPROVED" },
         409,
       );
-      assert.equal((await api("/me", spare.token)).teamId, t1.id);
+      assert.equal((await api("/me", spare.session)).teamId, t1.id);
       await api(
         `/teams/${t1.id}/members/${spare.id}`,
-        l1.token,
+        l1.session,
         "DELETE",
         null,
         204,
       );
-      assert.equal((await api("/me", spare.token)).active, true);
-      assert.equal((await api("/me", spare.token)).teamId, null);
+      assert.equal((await api("/me", spare.session)).active, true);
+      assert.equal((await api("/me", spare.session)).teamId, null);
       const reject = await api(
         `/teams/${t1.id}/requests`,
-        l1.token,
+        l1.session,
         "POST",
         { employeeId: spare.id },
         201,
@@ -178,26 +181,26 @@ test(
       await api("/team-requests/" + reject.id, at, "PATCH", {
         status: "REJECTED",
       });
-      assert.equal((await api("/me", spare.token)).teamId, null);
+      assert.equal((await api("/me", spare.session)).teamId, null);
       const stages = await api("/stages", at),
         won = stages.find((s) => s.kind === "WON");
       const c1 = await api(
         "/contacts",
-        l1.token,
+        l1.session,
         "POST",
         { name: "Alpha contact", assigneeId: e1.id },
         201,
       );
       const c2 = await api(
         "/contacts",
-        l2.token,
+        l2.session,
         "POST",
         { name: "Beta secret", assigneeId: e2.id },
         201,
       );
       const d1 = await api(
         "/deals",
-        l1.token,
+        l1.session,
         "POST",
         {
           title: "Alpha deal",
@@ -209,7 +212,7 @@ test(
       );
       const d2 = await api(
         "/deals",
-        l2.token,
+        l2.session,
         "POST",
         {
           title: "Beta secret deal",
@@ -221,7 +224,7 @@ test(
       );
       const task1 = await api(
         "/tasks",
-        l1.token,
+        l1.session,
         "POST",
         {
           title: "Alpha task",
@@ -233,7 +236,7 @@ test(
       );
       const task2 = await api(
         "/tasks",
-        l2.token,
+        l2.session,
         "POST",
         { title: "Beta secret task", assigneeId: e2.id, contactId: c2.id },
         201,
@@ -243,7 +246,7 @@ test(
         ["deals", d2.id],
         ["tasks", task2.id],
       ]) {
-        for (const tok of [l1.token, e1.token]) {
+        for (const tok of [l1.session, e1.session]) {
           await api(`/${type}/${id}`, tok, "GET", null, 404);
           await api(
             `/${type}/${id}`,
@@ -253,40 +256,40 @@ test(
             404,
           );
         }
-        await api(`/${type}/${id}`, l1.token, "DELETE", null, 404);
-        assert.equal((await api("/" + type, l1.token)).total, 1);
+        await api(`/${type}/${id}`, l1.session, "DELETE", null, 404);
+        assert.equal((await api("/" + type, l1.session)).total, 1);
       }
       await api(
         "/contacts",
-        l1.token,
+        l1.session,
         "POST",
         { name: "Escape", assigneeId: e2.id },
         404,
       );
       await api(
         "/contacts/" + c1.id,
-        l1.token,
+        l1.session,
         "PATCH",
         { name: "Escape", assigneeId: e2.id },
         404,
       );
       await api(
         "/deals",
-        l1.token,
+        l1.session,
         "POST",
         { title: "Escape", contactId: c2.id, stageId: won.id, value: "1" },
         404,
       );
       await api(
         "/tasks",
-        l1.token,
+        l1.session,
         "POST",
         { title: "Escape", contactId: c2.id },
         404,
       );
       await api(
         "/tasks",
-        l1.token,
+        l1.session,
         "POST",
         { title: "Escape", assigneeId: e2.id },
         403,
@@ -299,12 +302,12 @@ test(
         400,
       );
       assert.equal(
-        (await api("/contacts?assigneeId=" + e2.id, l1.token)).total,
+        (await api("/contacts?assigneeId=" + e2.id, l1.session)).total,
         0,
       );
-      const search = await api("/search?q=secret", l1.token);
+      const search = await api("/search?q=secret", l1.session);
       assert.deepEqual(search, { contacts: [], deals: [], tasks: [] });
-      const dash = await api("/dashboard", l1.token);
+      const dash = await api("/dashboard", l1.session);
       assert.equal(dash.kpis.contacts, 1);
       assert.equal(Number(dash.kpis.wonThisMonth), 1250.5);
       assert.equal(dash.monthly.at(-1).count, 1);
@@ -315,9 +318,9 @@ test(
       assert.equal(alpha.won, 1);
       assert.equal(alpha.revenue, "1250.5");
       assert.equal(alpha.completed, 1);
-      assert.equal((await api("/performance", l1.token)).teams.length, 1);
+      assert.equal((await api("/performance", l1.session)).teams.length, 1);
       assert.equal(
-        (await api("/performance", l1.token)).employees.some(
+        (await api("/performance", l1.session)).employees.some(
           (e) => e.id === e2.id,
         ),
         false,
@@ -325,27 +328,30 @@ test(
       // Removing a member immediately revokes the leader's access to their work.
       await api(
         `/teams/${t1.id}/members/${e1.id}`,
-        l1.token,
+        l1.session,
         "DELETE",
         null,
         204,
       );
-      await api("/contacts/" + c1.id, l1.token, "GET", null, 404);
-      assert.equal((await api("/contacts/" + c1.id, e1.token)).id, c1.id);
-      assert.equal((await api("/performance", l1.token)).teams[0].contacts, 0);
+      await api("/contacts/" + c1.id, l1.session, "GET", null, 404);
+      assert.equal((await api("/contacts/" + c1.id, e1.session)).id, c1.id);
+      assert.equal(
+        (await api("/performance", l1.session)).teams[0].contacts,
+        0,
+      );
       await api(`/teams/${t1.id}/members`, at, "POST", { employeeId: e1.id });
-      await api("/tasks/" + task1.id, l1.token, "DELETE", null, 204);
-      await api("/deals/" + d1.id, l1.token, "DELETE", null, 204);
-      await api("/contacts/" + c1.id, l1.token, "DELETE", null, 204);
+      await api("/tasks/" + task1.id, l1.session, "DELETE", null, 204);
+      await api("/deals/" + d1.id, l1.session, "DELETE", null, 204);
+      await api("/contacts/" + c1.id, l1.session, "DELETE", null, 204);
       // Only admin can replace a leader. Old leader loses authority immediately.
       await api("/teams/" + t1.id, at, "PATCH", { leaderId: e1.id });
-      assert.equal((await api("/me", l1.token)).role, "EMPLOYEE");
-      await api("/performance", l1.token, "GET", null, 403);
-      assert.equal((await api("/me", e1.token)).role, "SUB_ADMIN");
+      assert.equal((await api("/me", l1.session)).role, "EMPLOYEE");
+      await api("/performance", l1.session, "GET", null, 403);
+      assert.equal((await api("/me", e1.session)).role, "SUB_ADMIN");
       // Concurrent approval cannot review the same request twice.
       const r = await api(
         `/teams/${t1.id}/requests`,
-        e1.token,
+        e1.session,
         "POST",
         { employeeId: spare.id },
         201,
@@ -354,10 +360,7 @@ test(
         [1, 2].map(() =>
           fetch(base + "/team-requests/" + r.id, {
             method: "PATCH",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: "Bearer " + at,
-            },
+            headers: headers(at),
             body: JSON.stringify({ status: "APPROVED" }),
           }).then((r) => r.status),
         ),
@@ -365,6 +368,7 @@ test(
       assert.deepEqual(statuses.sort(), [200, 409]);
     } finally {
       const where = { orgId };
+      await prisma.activity.deleteMany({ where });
       await prisma.task.deleteMany({ where });
       await prisma.deal.deleteMany({ where });
       await prisma.contact.deleteMany({ where });
